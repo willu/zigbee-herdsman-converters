@@ -92,6 +92,7 @@ const getKey = (object, value) => {
 const store = {};
 
 const ictcg1 = (model, msg, publish, options, action) => {
+    const brightness = !options.hasOwnProperty('brightness') || options.brightness;
     const deviceID = msg.device.ieeeAddr;
     const payload = {};
 
@@ -102,45 +103,54 @@ const ictcg1 = (model, msg, publish, options, action) => {
     const s = store[deviceID];
 
     if (action === 'move') {
-        s.since = Date.now();
         const direction = msg.data.movemode === 1 ? 'left' : 'right';
-        s.direction = direction;
         payload.action = `rotate_${direction}`;
+        s.since = Date.now();
+        s.direction = direction;
     } else if (action === 'stop' || action === 'level') {
         if (action === 'level') {
-            s.value = msg.data.level;
             const direction = s.value === 0 ? 'left' : 'right';
             payload.action = `rotate_${direction}_quick`;
-            payload.brightness = s.value;
-        } else {
-            const duration = Date.now() - s.since;
-            const delta = Math.round((duration / 10) * (s.direction === 'left' ? -1 : 1));
-            const newValue = s.value + delta;
-            if (newValue >= 0 && newValue <= 255) {
-                s.value = newValue;
+            s.value = msg.data.level;
+
+            if (brightness) {
+                payload.brightness = s.value;
             }
+        } else {
             payload.action = 'rotate_stop';
-            payload.brightness = s.value;
+
+            if (brightness) {
+                const duration = Date.now() - s.since;
+                const delta = Math.round((duration / 10) * (s.direction === 'left' ? -1 : 1));
+                const newValue = s.value + delta;
+                if (newValue >= 0 && newValue <= 255) {
+                    s.value = newValue;
+                }
+                payload.brightness = s.value;
+            }
         }
     }
-    if (s.timerId) {
-        clearInterval(s.timerId);
-        s.timerId = false;
+
+    if (brightness) {
+        if (s.timerId) {
+            clearInterval(s.timerId);
+            s.timerId = false;
+        }
+        if (action === 'move') {
+            s.timerId = setInterval(() => {
+                const duration = Date.now() - s.since;
+                const delta = Math.round((duration / 10) * (s.direction === 'left' ? -1 : 1));
+                const newValue = s.value + delta;
+                if (newValue >= 0 && newValue <= 255) {
+                    s.value = newValue;
+                }
+                payload.brightness = s.value;
+                s.since = Date.now();
+                s.publish(payload);
+            }, 10);
+        }
+        s.publish(payload);
     }
-    if (action === 'move') {
-        s.timerId = setInterval(() => {
-            const duration = Date.now() - s.since;
-            const delta = Math.round((duration / 10) * (s.direction === 'left' ? -1 : 1));
-            const newValue = s.value + delta;
-            if (newValue >= 0 && newValue <= 255) {
-                s.value = newValue;
-            }
-            payload.brightness = s.value;
-            s.since = Date.now();
-            s.publish(payload);
-        }, 10);
-    }
-    s.publish(payload);
 };
 
 const ratelimitedDimmer = (model, msg, publish, options) => {
