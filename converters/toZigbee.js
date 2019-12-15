@@ -746,6 +746,13 @@ const converters = {
             await entity.command('genIdentify', 'identifyTime', {identifytime: value}, getOptions(meta));
         },
     },
+    ZNCLDJ11LM_ZNCLDJ12LM_reverse: {
+        key: ['reverse'],
+        convertSet: async (entity, key, value, meta) => {
+            const payload = [0x07, 0x00, 0x02, 0x01, 0x00, 0x00, 0x14];
+            await entity.write('genBasic', {0x0401: {value: payload, type: 0x42}}, options.xiaomi);
+        },
+    },
     ZNCLDJ11LM_ZNCLDJ12LM_control: {
         key: ['state', 'position'],
         convertSet: async (entity, key, value, meta) => {

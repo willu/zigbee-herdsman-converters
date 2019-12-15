@@ -725,7 +725,7 @@ const devices = [
         supports: 'open, close, stop, position',
         vendor: 'Xiaomi',
         fromZigbee: [fz.ZNCLDJ11LM_ZNCLDJ12LM_curtain_analog_output, fz.cover_position_tilt, fz.ignore_basic_report],
-        toZigbee: [tz.ZNCLDJ11LM_ZNCLDJ12LM_control],
+        toZigbee: [tz.ZNCLDJ11LM_ZNCLDJ12LM_control, tz.ZNCLDJ11LM_ZNCLDJ12LM_reverse],
     },
     {
         zigbeeModel: ['lumi.curtain.hagl04'],
