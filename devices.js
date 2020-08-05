@@ -2512,8 +2512,10 @@ const devices = [
         model: 'ML-ST-D200',
         vendor: 'M-ELEC',
         description: 'Stitchy Dim switchable wall module',
-        extend: generic.light_onoff_brightness,
-        ota: ota.zigbeeOTA,
+	supports: 'on/off, brightness',
+	fromZigbee: [fz.on_off, fz.brightness, fz.command_on, fz.command_off],
+	toZigbee: [tz.light_onoff_brightness],
+	// ota: ota.zigbeeOTA,
     },
 
     // OSRAM

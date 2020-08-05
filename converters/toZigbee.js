@@ -753,6 +753,77 @@ const converters = {
             await entity.command('genIdentify', 'triggerEffect', payload, getOptions(meta.mapped));
         },
     },
+    scene_add: {
+        key: ['scene_add'],
+        convertSet: async (entity, key, value, meta) => {
+            if (value.hasOwnProperty('name') && value.hasOwnProperty('sceneID') && entity.constructor.name === 'Group') {
+		group = entity.groupID;
+		sceneID = Number(value.sceneID);
+		transit_time = 0;
+		if (value.hasOwnProperty('transittime')) {
+		    transit_time = Number(value.transittime);
+		}
+                await entity.command('genScenes', 'store', {groupid: group, sceneid: sceneID, transtime: transit_time, scenename: value.name}, getOptions(meta.mapped));
+            } else {
+                meta.logger.debug(`scene_add: Has name: ${value.hasOwnProperty('name')}, Has sceneId: ${value.hasOwnProperty('sceneID')}, Is group: ${entity.constructor.name === 'Group'}`);
+	    }
+        },
+    },
+    scene_view: {
+        key: ['scene_view'],
+	// It would be nice to use convertGet here, but then we don't have a value for the sceneID.
+        convertSet: async (entity, key, value, meta) => {
+            value = Number(value);
+	    group = 0
+	    if (entity.constructor.name === 'Group') {
+		group = entity.groupID;
+            }
+            await entity.command('genScenes', 'view', {groupid: group, sceneid: value}, getOptions(meta.mapped));
+        },
+    },
+    scene_store: {
+        key: ['scene_store'],
+        convertSet: async (entity, key, value, meta) => {
+            value = Number(value);
+	    group = 0
+	    if (entity.constructor.name === 'Group') {
+		group = entity.groupID;
+            }
+            await entity.command('genScenes', 'store', {groupid: group, sceneid: value}, getOptions(meta.mapped));
+        },
+    },
+    scene_recall: {
+        key: ['scene_recall'],
+        convertSet: async (entity, key, value, meta) => {
+            value = Number(value);
+	    group = 0
+	    if (entity.constructor.name === 'Group') {
+		group = entity.groupID;
+            }
+            await entity.command('genScenes', 'recall', {groupid: group, sceneid: value}, getOptions(meta.mapped));
+        },
+    },
+    scene_remove: {
+        key: ['scene_remove'],
+        convertSet: async (entity, key, value, meta) => {
+            value = Number(value);
+	    group = 0
+	    if (entity.constructor.name === 'Group') {
+		group = entity.groupID;
+            }
+            await entity.command('genScenes', 'remove', {groupid: group, sceneid: value}, getOptions(meta.mapped));
+        },
+    },
+    scene_remove_all: {
+        key: ['scene_remove_all'],
+        convertSet: async (entity, key, value, meta) => {
+	    group = 0
+	    if (entity.constructor.name === 'Group') {
+		group = entity.groupID;
+            }
+            await entity.command('genScenes', 'removeAll', {groupid: group}, getOptions(meta.mapped));
+        },
+    },
     thermostat_local_temperature: {
         key: ['local_temperature'],
         convertGet: async (entity, key, meta) => {
