@@ -218,6 +218,40 @@ const holdUpdateBrightness324131092621 = (deviceID) => {
     }
 };
 
+const moesThermostat = (model, msg, publish, options, meta) => {
+    const dp = msg.data.dp;
+    const data = msg.data.data;
+    const dataAsDecNumber = utils.convertMultiByteNumberPayloadToSingleDecimalNumber(data);
+    let temperature;
+    // See tuyaThermostat above for message structure comment
+    switch (dp) {
+    case 257: // 0x0101 Thermostat on standby = OFF, running = ON
+        return {running: dataAsDecNumber ? 'ON' : 'OFF'};
+    case 296: // 0x2801 Changed child lock status for moes thermostat
+        return {child_lock: dataAsDecNumber ? 'LOCKED' : 'UNLOCKED'};
+    case 263: // 0x0701 Changed child lock status
+        return {child_lock: dataAsDecNumber ? 'LOCKED' : 'UNLOCKED'};
+    case 528: // 0x1002 set temperature
+        temperature = dataAsDecNumber;
+        return {current_heating_setpoint: temperature};
+    case 536: // 0x1802 moes room temperature
+        temperature = (dataAsDecNumber / 10).toFixed(1);
+        return {local_temperature: temperature};
+    case 556: // 0x2c02 Temperature calibration
+        temperature = (dataAsDecNumber / 10).toFixed(1);
+        return {local_temperature_calibration: temperature};
+    case 1026: // 0x0204 Changed program mode for moes thermostat
+        return {program_mode: dataAsDecNumber ? 'ON' : 'OFF'};
+    case 1027: // 0x0304 Changed manual mode status for moes thermostat
+        return {manual_mode: dataAsDecNumber ? 'ON' : 'OFF'};
+    case 1060: // 0x2404 Moes Thermostat is Open or Closed
+        return {Heat: dataAsDecNumber ? 'OFF' : 'ON'};
+    default: // The purpose of the codes 1041 & 1043 are still unknown
+        console.log(`zigbee-herdsman-converters:Moes BHT-002-GCLZB: NOT RECOGNIZED DP #${
+            dp} with data ${JSON.stringify(data)}`);
+    }
+};
+
 const tuyaThermostat = (model, msg, publish, options, meta) => {
     const dp = msg.data.dp;
     const data = msg.data.data;
@@ -511,7 +545,7 @@ const converters = {
         convert: (model, msg, publish, options, meta) => {
             // DEPRECATED: only return lux here (change illuminance_lux -> illuminance)
             const illuminance = msg.data['measuredValue'];
-            const illuminanceLux = Math.pow(10, (illuminance - 1) / 10000);
+            const illuminanceLux = Math.pow(10, illuminance / 10000) - 1;
             return {
                 illuminance: calibrateAndPrecisionRoundOptions(illuminance, options, 'illuminance'),
                 illuminance_lux: calibrateAndPrecisionRoundOptions(illuminanceLux, options, 'illuminance_lux'),
@@ -609,13 +643,7 @@ const converters = {
         convert: (model, msg, publish, options, meta) => {
             if (msg.data.hasOwnProperty('currentLevel')) {
                 const property = postfixWithEndpointName('brightness', msg, model);
-                let value = msg.data['currentLevel'];
-
-                if (meta.state && meta.state.state === 'OFF') {
-                    value = 0;
-                }
-
-                return {[property]: value};
+                return {[property]: msg.data['currentLevel']};
             }
         },
     },
@@ -714,6 +742,18 @@ const converters = {
             const zoneStatus = msg.data.zonestatus;
             return {
                 water_leak: (zoneStatus & 1) > 0,
+                tamper: (zoneStatus & 1<<2) > 0,
+                battery_low: (zoneStatus & 1<<3) > 0,
+            };
+        },
+    },
+    ias_vibration_alarm_1: {
+        cluster: 'ssIasZone',
+        type: 'commandStatusChangeNotification',
+        convert: (model, msg, publish, options, meta) => {
+            const zoneStatus = msg.data.zonestatus;
+            return {
+                vibration: (zoneStatus & 1) > 0,
                 tamper: (zoneStatus & 1<<2) > 0,
                 battery_low: (zoneStatus & 1<<3) > 0,
             };
@@ -1166,6 +1206,35 @@ const converters = {
     /**
      * Non-generic converters, re-use if possible
      */
+    xiaomi_battery: {
+        cluster: 'genBasic',
+        type: ['attributeReport', 'readResponse'],
+        convert: (model, msg, publish, options, meta) => {
+            let voltage = null;
+            if (msg.data['65281']) {
+                voltage = msg.data['65281']['1'];
+            } else if (msg.data['65282']) {
+                voltage = msg.data['65282']['1'].elmVal;
+            }
+
+            if (voltage) {
+                const payload = {
+                    voltage: voltage, // @deprecated
+                    // voltage: voltage / 1000.0,
+                };
+
+                if (model.meta && model.meta.battery && model.meta.battery.voltageToPercentage) {
+                    if (model.meta.battery.voltageToPercentage === 'CR2032') {
+                        payload.battery = toPercentageCR2032(payload.voltage);
+                    } else if (model.meta.battery.voltageToPercentage === '4LR6AA1_5v') {
+                        payload.battery = toPercentage(voltage, 3000, 4200);
+                    }
+                }
+
+                return payload;
+            }
+        },
+    },
     xiaomi_on_off_action: {
         cluster: 'genOnOff',
         type: ['attributeReport'],
@@ -2096,27 +2165,6 @@ const converters = {
             return {contact: msg.data.zonestatus === 48};
         },
     },
-    xiaomi_battery_3v: {
-        cluster: 'genBasic',
-        type: ['attributeReport', 'readResponse'],
-        convert: (model, msg, publish, options, meta) => {
-            let voltage = null;
-
-            if (msg.data['65281']) {
-                voltage = msg.data['65281']['1'];
-            } else if (msg.data['65282']) {
-                voltage = msg.data['65282']['1'].elmVal;
-            }
-
-            if (voltage) {
-                return {
-                    battery: toPercentageCR2032(voltage),
-                    voltage: voltage, // @deprecated
-                    // voltage: voltage / 1000.0,
-                };
-            }
-        },
-    },
     RTCGQ11LM_interval: {
         cluster: 'genBasic',
         type: ['attributeReport', 'readResponse'],
@@ -2247,6 +2295,8 @@ const converters = {
         cluster: 'genOnOff',
         type: 'commandOnWithTimedOff',
         convert: (model, msg, publish, options, meta) => {
+            if (msg.data.ctrlbits === 1) return;
+
             const timeout = msg.data.ontime / 10;
             const deviceID = msg.device.ieeeAddr;
 
@@ -2324,37 +2374,38 @@ const converters = {
         convert: (model, msg, publish, options, meta) => {
             const result = {};
 
-            if (msg.data['colorTemperature']) {
+            if (msg.data.hasOwnProperty('colorTemperature')) {
                 result.color_temp = msg.data['colorTemperature'];
             }
 
-            if (msg.data['colorMode']) {
+            if (msg.data.hasOwnProperty('colorMode')) {
                 result.color_mode = msg.data['colorMode'];
             }
 
             if (
-                msg.data['currentX'] || msg.data['currentY'] || msg.data['currentSaturation'] ||
-                msg.data['currentHue'] || msg.data['enhancedCurrentHue']
+                msg.data.hasOwnProperty('currentX') || msg.data.hasOwnProperty('currentY') ||
+                msg.data.hasOwnProperty('currentSaturation') || msg.data.hasOwnProperty('currentHue') ||
+                msg.data.hasOwnProperty('enhancedCurrentHue')
             ) {
                 result.color = {};
 
-                if (msg.data['currentX']) {
+                if (msg.data.hasOwnProperty('currentX')) {
                     result.color.x = precisionRound(msg.data['currentX'] / 65535, 4);
                 }
 
-                if (msg.data['currentY']) {
+                if (msg.data.hasOwnProperty('currentY')) {
                     result.color.y = precisionRound(msg.data['currentY'] / 65535, 4);
                 }
 
-                if (msg.data['currentSaturation']) {
+                if (msg.data.hasOwnProperty('currentSaturation')) {
                     result.color.saturation = precisionRound(msg.data['currentSaturation'] / 2.54, 0);
                 }
 
-                if (msg.data['currentHue']) {
+                if (msg.data.hasOwnProperty('currentHue')) {
                     result.color.hue = precisionRound((msg.data['currentHue'] * 360) / 254, 0);
                 }
 
-                if (msg.data['enhancedCurrentHue']) {
+                if (msg.data.hasOwnProperty('enhancedCurrentHue')) {
                     result.color.hue = precisionRound(msg.data['enhancedCurrentHue'] / (65535 / 360), 1);
                 }
             }
@@ -2516,11 +2567,17 @@ const converters = {
         convert: (model, msg, publish, options, meta) => {
             if (msg.data['65281']) {
                 const data = msg.data['65281'];
-                return {
-                    power: precisionRound(data['152'], 2),
-                    consumption: precisionRound(data['149'], 2),
-                    temperature: calibrateAndPrecisionRoundOptions(data['3'], options, 'temperature'),
-                };
+                const result = {};
+                if (data['152']) {
+                    result.power = precisionRound(data['152'], 2);
+                }
+                if (data['149']) {
+                    result.consumption = precisionRound(data['149'], 2);
+                }
+                if (data['3']) {
+                    result.temperature = calibrateAndPrecisionRoundOptions(data['3'], options, 'temperature');
+                }
+                return result;
             }
         },
     },
@@ -2633,6 +2690,43 @@ const converters = {
                 const value = msg.data.armmode;
                 return {action: lookup[value] || `armmode_${value}`};
             }
+        },
+    },
+    heiman_pm25: {
+        cluster: 'heimanSpecificPM25Measurement',
+        type: ['attributeReport', 'readResponse'],
+        convert: (model, msg, publish, options, meta) => {
+            const result = {};
+            if (msg.data['measuredValue']) result['pm25'] = msg.data['measuredValue'];
+            return result;
+        },
+    },
+    heiman_hcho: {
+        cluster: 'heimanSpecificFormaldehydeMeasurement',
+        type: ['attributeReport', 'readResponse'],
+        convert: (model, msg, publish, options, meta) => {
+            const result = {};
+            if (msg.data['measuredValue']) result['hcho'] = parseFloat(msg.data['measuredValue']) / 100.0;
+            return result;
+        },
+    },
+    heiman_air_quality: {
+        cluster: 'heimanSpecificAirQuality',
+        type: ['attributeReport', 'readResponse'],
+        convert: (model, msg, publish, options, meta) => {
+            const result = {};
+            if (msg.data['batteryState']) {
+                const lookup = {
+                    0: 'not_charging',
+                    1: 'charging',
+                    2: 'charged',
+                };
+                result['battery_state'] = lookup[msg.data['batteryState']];
+            }
+            if (msg.data['tvocMeasuredValue']) result['voc'] = msg.data['tvocMeasuredValue'];
+            if (msg.data['aqiMeasuredValue']) result['aqi'] = msg.data['aqiMeasuredValue'];
+            if (msg.data['pm10measuredValue']) result['pm10'] = msg.data['pm10measuredValue'];
+            return result;
         },
     },
     TS0218_click: {
@@ -3455,6 +3549,29 @@ const converters = {
             return result;
         },
     },
+    sinope_GFCi_status: {
+        // TH1300ZB specific
+        cluster: 'manuSpecificSinope',
+        type: ['attributeReport', 'readResponse'],
+        convert: (model, msg, publish, options, meta) => {
+            const lookup = {0: 'off', 1: 'on'};
+            if (msg.data.hasOwnProperty('GFCiStatus')) {
+                return {gfci_status: lookup[msg.data['GFCiStatus']]};
+            }
+        },
+    },
+    sinope_floor_limit_status: {
+        // TH1300ZB specific
+        cluster: 'manuSpecificSinope',
+        type: ['attributeReport', 'readResponse'],
+        convert: (model, msg, publish, options, meta) => {
+            const lookup = {0: 'off', 1: 'on'};
+            if (msg.data.hasOwnProperty('floorLimitStatus')) {
+                return {floor_limit_status: lookup[msg.data['floorLimitStatus']]};
+            }
+        },
+    },
+
     eurotronic_thermostat: {
         cluster: 'hvacThermostat',
         type: ['attributeReport', 'readResponse'],
@@ -4423,6 +4540,15 @@ const converters = {
             return result;
         },
     },
+    ZNMS12LM_low_battery: {
+        cluster: 'genPowerCfg',
+        type: ['attributeReport', 'readResponse'],
+        convert: (model, msg, publish, options, meta) => {
+            if (typeof msg.data['batteryAlarmMask'] == 'number') {
+                return {battery_low: msg.data['batteryAlarmMask'] === 1};
+            }
+        },
+    },
     DTB190502A1_parse: {
         cluster: 'genOnOff',
         type: ['attributeReport', 'readResponse'],
@@ -5240,6 +5366,16 @@ const converters = {
             }
         },
     },
+    moes_thermostat_on_set_data: {
+        cluster: 'manuSpecificTuyaDimmer',
+        type: 'commandSetDataResponse',
+        convert: moesThermostat,
+    },
+    moes_thermostat: {
+        cluster: 'manuSpecificTuyaDimmer',
+        type: 'commandGetData',
+        convert: moesThermostat,
+    },
     tuya_thermostat_on_set_data: {
         cluster: 'manuSpecificTuyaDimmer',
         type: 'commandSetDataResponse',
@@ -5573,9 +5709,10 @@ const converters = {
     },
     greenpower_on_off_switch: {
         cluster: 'greenPower',
-        type: 'commandNotification',
+        type: ['commandNotification', 'commandCommisioningNotification'],
         convert: (model, msg, publish, options, meta) => {
             const commandID = msg.data.commandID;
+            if (commandID === 224) return; // Skip commisioning command.
             const lookup = {
                 0x00: 'identify',
                 0x10: 'recall_scene_0',
@@ -5614,9 +5751,10 @@ const converters = {
     },
     greenpower_7: {
         cluster: 'greenPower',
-        type: 'commandNotification',
+        type: ['commandNotification', 'commandCommisioningNotification'],
         convert: (model, msg, publish, options, meta) => {
             const commandID = msg.data.commandID;
+            if (commandID === 224) return; // Skip commisioning command.
             let postfix = '';
 
             if (msg.data.commandFrame && msg.data.commandFrame.raw) {
